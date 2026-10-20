@@ -1,0 +1,30 @@
+name: Prune unapproved fork runs
+
+on:
+  pull_request_target:
+    types: [synchronize]
+
+permissions:
+  actions: write
+
+jobs:
+  prune:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Delete approval-pending runs for the superseded head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          gh api --paginate --method GET "repos/$REPO/actions/runs" \
+            -f event=pull_request -f status=action_required -f head_sha="$BEFORE_SHA" \
+            --jq '.workflow_runs[] | select(.head_repository.full_name == env.HEAD_REPO) | .id' |
+          while read -r id; do
+            echo "Deleting run $id"
+            gh api --method DELETE "repos/$REPO/actions/runs/$id" ||
+              echo "::warning::Could not delete run $id"
+          done
